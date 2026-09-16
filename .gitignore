@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+
+# Probe output: measurements go into PLAN.md, not the repo.
+probe_results.json

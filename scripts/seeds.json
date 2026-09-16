@@ -1,0 +1,24 @@
+[
+  { "title": "12th Fail",           "imdb": "tt23849204", "group": "indian",  "kind": "movie" },
+  { "title": "Laapataa Ladies",     "imdb": "tt21626284", "group": "indian",  "kind": "movie" },
+  { "title": "Jawan",               "imdb": "tt15354916", "group": "indian",  "kind": "movie" },
+  { "title": "RRR",                 "imdb": "tt8178634",  "group": "indian",  "kind": "movie" },
+  { "title": "Kantara",             "imdb": "tt15327088", "group": "indian",  "kind": "movie" },
+  { "title": "Gangs of Wasseypur",  "imdb": "tt1954470",  "group": "indian",  "kind": "movie" },
+  { "title": "Sacred Games",        "imdb": "tt6077448",  "group": "indian",  "kind": "tv" },
+  { "title": "Panchayat",           "imdb": "tt12004706", "group": "indian",  "kind": "tv" },
+  { "title": "Kota Factory",        "imdb": "tt9432978",  "group": "indian",  "kind": "tv" },
+
+  { "title": "Past Lives",          "imdb": "tt13238346", "group": "western", "kind": "movie" },
+  { "title": "Everything Everywhere All at Once", "imdb": "tt6710474", "group": "western", "kind": "movie" },
+  { "title": "Oppenheimer",         "imdb": "tt15398776", "group": "western", "kind": "movie" },
+  { "title": "Dune",                "imdb": "tt1160419",  "group": "western", "kind": "movie" },
+  { "title": "Poor Things",         "imdb": "tt14230458", "group": "western", "kind": "movie" },
+  { "title": "The Bear",            "imdb": "tt14452776", "group": "western", "kind": "tv" },
+  { "title": "Severance",           "imdb": "tt11280740", "group": "western", "kind": "tv" },
+  { "title": "Succession",          "imdb": "tt7660850",  "group": "western", "kind": "tv" },
+
+  { "title": "Parasite",            "imdb": "tt6751668",  "group": "other",   "kind": "movie" },
+  { "title": "Drive My Car",        "imdb": "tt14039582", "group": "other",   "kind": "movie" },
+  { "title": "Squid Game",          "imdb": "tt10919420", "group": "other",   "kind": "tv" }
+]

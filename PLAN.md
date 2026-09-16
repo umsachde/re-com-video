@@ -1,9 +1,21 @@
 # re-com-video — Design, Research & Roadmap
 
-The movie and TV sibling of [re-com](https://github.com/umsachde/re-com). **Status: planning.
-There is no code yet, on purpose.** This document is the whole project for now: what it should
-do, what the research found, what was ruled out and why, and what has to be measured before
-anything is built.
+The movie and TV sibling of [re-com](https://github.com/umsachde/re-com). **Status: Phase 0 half
+measured, Phase 1 built.** This document carries the design, the research, what was ruled out and
+why, and what has been measured so far.
+
+**What exists as of 2026-09-15**
+
+| | |
+| --- | --- |
+| `simkl-mcp` | Built (§7.1) — client, PIN auth, sync, detail reads, ID resolution, writes; 84 unit tests, no network. Not yet run against a live account: needs a `client_id`. |
+| `wikidata.py` | Built and **verified live** — enrichment and maker-neighbour expansion; 24 unit tests. |
+| `scripts/probe.py` | Built. Wikidata half **run** (§9.1a); Simkl half blocked on a `client_id`. |
+| The engine (§7.2) | Not started. Phase 2. |
+
+**The one thing blocking the rest:** a free Simkl app registered at
+[simkl.com/settings/developer](https://simkl.com/settings/developer), which yields the `client_id`
+that every Simkl call needs. Without it the decisive measurement (§9.1 question 1) cannot run.
 
 It follows re-com's convention: one document, decisions with the alternative they beat, and
 facts labelled by how well they are known. Every external claim carries the date it was
@@ -508,6 +520,76 @@ language), 8 Western, 4 other (e.g. Korean); a mix of movies and shows.
 - Viewer ∩ maker overlap near zero → they're independent: expect variety, not corroboration.
 - Import drops many titles → exclusion needs an explicit "unmatched history" report.
 
+### 9.1a Phase 0 — first results (Wikidata half)
+
+**Measured 2026-09-15** by `scripts/probe.py --skip-simkl` over 20 placeholder seeds (9 Indian,
+8 Western, 3 other; a mix of films and series). The Simkl half has not run — it needs a
+`client_id` — so questions 1, 2 and 4 are **undecided, not passed**.
+
+| Group | Seeds | Wikidata found | Has director | Median maker neighbours |
+| --- | --: | --: | --: | --: |
+| Indian | 9 | 9/9 | 8/9 | **19** |
+| Western | 8 | 8/8 | 6/8 | **13.5** |
+| Other (KR, JP) | 3 | 3/3 | 3/3 | **25** |
+
+**1. The geography worry was the wrong worry.** Decision gate 1 expected Indian seeds to be the
+thin ones. On the maker signal they are the *thickest* — 20/20 seeds resolved by IMDb ID, all 20
+carried an original language, and the Indian median beats the Western one. Wikidata is not weak
+on this catalogue.
+
+**2. The real gap is format, not region — and it is new.** Every seed that returned **zero**
+maker neighbours is a series: *Kota Factory* (0), *The Bear* (0), *Panchayat* (1). *Succession*
+has no director in Wikidata at all and survives only on its composer. P57/P58 are film
+properties; series credit episode directors, who are not modelled the same way.
+
+> **The maker signal is a movie signal.** For TV it degrades to composer-only, and sometimes to
+> nothing. That makes Simkl's `users_recommendations` not merely the better signal for TV but
+> very likely the *only* one — which raises, rather than lowers, the stakes on the measurement
+> still blocked. If TV neighbour counts also come back thin, v1 has no TV recommender and the
+> plan has to say so plainly rather than shipping a thin one.
+
+**3. Music director is the load-bearing Indian signal, as predicted — more so than predicted.**
+`composer` (P86) fires on 6 of 9 Indian seeds and is usually the largest contributor: 12 of 23
+for *12th Fail*, 12 of 14 for *Laapataa Ladies*. §2.4 listed music director as "a real taste
+axis" for Indian film; measured, it carries that catalogue.
+
+**4. `writer` (P58) is sparse**, returning nothing for 5 of 9 Indian seeds — consistent with the
+22% writer coverage measured in §4.3. It earns a place in the signal list but not weight.
+
+**5. Same-director concentration is real but tolerable so far.** *Gangs of Wasseypur* ↔ *Sacred
+Games* (both Anurag Kashyap) share 10 candidate titles, Jaccard **0.312**, at a cap of 12 results
+per person. Below the 0.5 line, and worth re-measuring with the viewer signal mixed in — this is
+the defect that cost re-com §7.10–§7.14 the most time.
+
+**6. Wikidata's query service returns transient `502`s.** Observed on the first live run, on a
+query that succeeded unchanged moments later. Retried (bounded, 3 attempts) in `wikidata.py`; a
+`429` and a query timeout deliberately are not, because retrying either makes it worse.
+
+**7. Titles collide exactly as §8.5 claimed.** A live label query on 2026-09-15 matched
+"Panchayat" to 4 Wikidata items, "Parasite" to 6, "Severance" to 5 and "The Family Man" to 6.
+Both the probe and `wikidata.py` refuse to join on anything but an IMDb ID.
+
+### 9.1b Two endpoints §7.1 missed
+
+Found while building `simkl-mcp`, verified in the Simkl docs on 2026-09-15, and now in its tool
+surface:
+
+- **`POST /sync/watched`** — posts a batch of items and returns, per item, whether it is in the
+  user's library, its status and when it was last watched. This is a *server-side* answer to the
+  question the guarantee rests on. The engine excludes against its local mirror, which is only as
+  fresh as the last sync; this makes the guarantee checkable rather than merely believed, and
+  catches anything watched since. It belongs in §9.2's live smoke harness as the assertion behind
+  "excludes history".
+- **`GET /sync/ratings/{type}/{rating}`** — reads ratings back directly instead of inferring them
+  from a full library pull. Ratings 8–10 are §5.1's strongest seeds, so fetching them should not
+  require transferring the whole library.
+
+One correction to §4.2's PIN notes: the `device_code` in the PIN response is the **literal string
+`"DEVICE_CODE"`**, a placeholder kept for RFC 8628 shape compatibility. Polling uses `user_code`.
+Polling must also stop at the first token — Simkl deletes an approved code, and polling an unknown
+code falls through to the *issue-a-new-code* branch, so a client that kept going would be handed a
+fresh code and wait forever.
+
 ### 9.2 Once there is code (mirrors re-com §5)
 
 | Layer | Covers |
@@ -523,15 +605,20 @@ harness gets its own tests.
 
 ## 10. Roadmap
 
-| Phase | Scope | Code? |
+| Phase | Scope | State |
 | --- | --- | --- |
-| **0 — Probe** | §9.1. Request the Netflix data export now. Write results back into this document. | throwaway scripts only |
-| **1 — `simkl-mcp`** | PIN auth, library sync, title details, ID resolution, writes (§7.1) | yes |
-| **2 — v1 engine** | `recommend_from_titles`, `recommend_for_tonight`, explain, refresh, taste, exclusion, Wikidata enrichment cache | yes |
-| **3 — History depth** | Direct Netflix CSV importer (durations), implicit feedback (§5.2), unmatched-history report | yes |
-| **4 — More ways to ask** | watchlist triage, people, franchise-next, new releases, surprise me, watching together (§2.4) | yes |
-| **5 — Tone** | a mood/tone layer beyond genre: Claude reading overviews, best-source-wins like re-com §4.5 | yes |
+| **0 — Probe** | §9.1. Write results back into this document. | **Wikidata half done (§9.1a).** Simkl half blocked on a `client_id`. Netflix data export still to request — it takes up to 30 days. |
+| **1 — `simkl-mcp`** | PIN auth, library sync, title details, ID resolution, writes (§7.1) | **Built**, 84 unit tests. Unrun against a live account. |
+| **2 — v1 engine** | `recommend_from_titles`, `recommend_for_tonight`, explain, refresh, taste, exclusion, Wikidata enrichment cache | `wikidata.py` (the maker half) built and live-verified. The Simkl half, scoring, exclusion and the tool surface are next. |
+| **3 — History depth** | Direct Netflix CSV importer (durations), implicit feedback (§5.2), unmatched-history report | not started |
+| **4 — More ways to ask** | watchlist triage, people, franchise-next, new releases, surprise me, watching together (§2.4) | not started |
+| **5 — Tone** | a mood/tone layer beyond genre: Claude reading overviews, best-source-wins like re-com §4.5 | not started |
 | **6 — Availability** | only if a free, lawful, region-aware source appears (§4.6) | — |
+
+**Next, in order.** (1) Register the Simkl app and run `scripts/probe.py` in full — §9.1a's
+question 2 about TV is now the one that decides whether v1 recommends TV at all. (2) Request the
+Netflix personal-data export, which takes up to 30 days and is wanted before phase 3. (3) Build
+the phase 2 engine on whatever the probe says, not on what this document assumed.
 
 ---
 

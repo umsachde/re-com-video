@@ -1,0 +1,29 @@
+[project]
+name = "re-com-video"
+version = "0.1.0"
+description = "MCP engine that recommends movies and TV, guaranteed to exclude anything you've already watched (sources: Simkl + Wikidata)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.31",
+    "mcp>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/umsachde/re-com-video"
+
+[tool.setuptools]
+# Flat layout, as in re-com: modules sit at the repo root beside scripts/ and
+# tests/. Setuptools refuses to guess when more than one top-level module is
+# present, so they are listed. Keep in sync when adding one -- an unlisted
+# module stays importable from the repo (tests put the root on sys.path) but is
+# missing from an installed copy, which is the quiet half of that failure.
+py-modules = ["wikidata"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
