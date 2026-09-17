@@ -3,9 +3,9 @@
 Movie and TV recommendations that never suggest something you've already seen — the video
 sibling of [re-com](https://github.com/umsachde/re-com).
 
-> **Status: Phase 0 measured, Phase 1 built.** The sibling server
-> [`simkl-mcp`](https://github.com/umsachde/simkl-mcp) is written and tested, and the Phase 0
-> probe has run in full against live Simkl and Wikidata. The recommender itself is next.
+> **Status: v1 engine works end to end.** Both recommendation flows run against live Simkl and
+> Wikidata, with exclusion holding. 134 unit tests, no network. What's left before it's finished:
+> the PIN login for real history sync, and the Netflix import path.
 > Design, research and measurements are in [PLAN.md](PLAN.md).
 
 ## The idea
@@ -35,11 +35,28 @@ in [PLAN.md §4.1](PLAN.md#41-ruled-out).
 ## What's here now
 
 ```
+server.py            the MCP tool surface (7 tools)
+recommend.py         seeding, candidate gathering, the two flows
+signals.py           agreement scoring, exclusion, explanations
+filters.py           filters that report what they removed
+store.py             SQLite: history mirror, taste weights, caches, served log
+simkl_source.py      spawns simkl-mcp over stdio; holds no credentials
 wikidata.py          maker-side signal: enrichment by IMDb ID, neighbour expansion
 scripts/probe.py     Phase 0 — measures both signals before the engine is built on them
-scripts/seeds.json   20 placeholder seeds. Replace with what you've actually watched.
-tests/               24 unit tests, no network
+tests/               134 unit tests, no network
 ```
+
+## Tools
+
+| Tool | Does |
+| --- | --- |
+| `recommend_from_titles(titles, …)` | "More like *Panchayat*". Several seeds rank far better than one. |
+| `recommend_for_tonight(…)` | Seeded from what you rated 8–10 and series you finished. |
+| `explain_recommendation(title)` | Which of your titles reached it, through which signal. |
+| `read_my_taste()` | What your history says you like — and what it says you don't. |
+| `refresh_library(ids=…, full=…)` | Resync. Pass `ids` right after logging something so it's excluded now. |
+| `record_feedback(title, reaction)` | Local only. Never written to Simkl. |
+| `index_status()` | History size, last sync, cache coverage, known gaps. |
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate

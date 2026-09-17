@@ -652,6 +652,28 @@ surface:
   from a full library pull. Ratings 8–10 are §5.1's strongest seeds, so fetching them should not
   require transferring the whole library.
 
+**A third shape trap, found by the first live run of the engine (2026-09-16).** Simkl names the
+same two things differently depending on which endpoint answered:
+
+| Endpoint | Simkl ID key | Type key and value |
+| --- | --- | --- |
+| `/search/{type}` | `ids.simkl_id` | `endpoint_type: "tv"` |
+| `/tv/{id}` | `ids.simkl` | `type: "show"` |
+| `/movies/{id}` | `ids.simkl` | `type: "movie"` |
+| `/sync/all-items` | `ids.simkl` | implied by the list key |
+
+An engine keying on `ids.simkl` gets `None` from every search result and drops the title — which,
+in something whose job is an exclusion set, is the quiet kind of wrong. Everything leaving
+`simkl-mcp` is now normalized to `ids.simkl` plus a `type` of movie / tv / anime, non-destructively.
+
+**And the disambiguation failure it exposed.** `/search` takes **one type at a time**. Asked for
+"Panchayat" against movies, Simkl confidently returns the 2017 Bengali *film* — and never mentions
+that the 2020 Hindi series exists. The first live run of the engine seeded from the wrong work and
+produced a plausible-looking answer. §8.5 said "never join on title"; this is the sharper version:
+**never resolve a seed from one type's search either.** The engine now searches all three types,
+pools them, and refuses with the options listed when more than one survives. A year in the title
+("Panchayat 2020") is how the user answers.
+
 One correction to §4.2's PIN notes: the `device_code` in the PIN response is the **literal string
 `"DEVICE_CODE"`**, a placeholder kept for RFC 8628 shape compatibility. Polling uses `user_code`.
 Polling must also stop at the first token — Simkl deletes an approved code, and polling an unknown
