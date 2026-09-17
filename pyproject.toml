@@ -22,7 +22,15 @@ Homepage = "https://github.com/umsachde/re-com-video"
 # present, so they are listed. Keep in sync when adding one -- an unlisted
 # module stays importable from the repo (tests put the root on sys.path) but is
 # missing from an installed copy, which is the quiet half of that failure.
-py-modules = ["wikidata"]
+py-modules = [
+    "filters",
+    "recommend",
+    "server",
+    "signals",
+    "simkl_source",
+    "store",
+    "wikidata",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
