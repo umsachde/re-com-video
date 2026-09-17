@@ -144,12 +144,26 @@ def enrich(imdb: str | None, store) -> dict[str, Any] | None:
 # --- candidate gathering ----------------------------------------------------
 
 
-def gather_seed(source, store, seed: dict[str, Any], *, with_makers: bool = True) -> dict[int, dict[str, Any]]:
+def gather_seed(
+    source,
+    store,
+    seed: dict[str, Any],
+    *,
+    with_makers: bool = True,
+    degraded: list[str] | None = None,
+) -> dict[int, dict[str, Any]]:
     """Every candidate reachable from one seed, tagged with its provenance.
 
     Returns {simkl_id: {..., "sources": {(seed_id, signal), ...}}}. The tuple
     is what the score counts and what the explanation reads -- one structure,
     so the two cannot disagree.
+
+    A failure in *one* signal degrades the result; it does not sink the
+    request. Wikidata is a public service with a 60-second budget and it does
+    time out -- which it did on the first run against a real library. The
+    viewer signal alone is still a usable answer, and it is a far better one
+    than an exception. What was lost is appended to `degraded` so the response
+    can say so rather than quietly returning less (PLAN.md 1, requirement 3).
     """
     seed_id = seed["simkl_id"]
     found: dict[int, dict[str, Any]] = {}
@@ -171,6 +185,7 @@ def gather_seed(source, store, seed: dict[str, Any], *, with_makers: bool = True
                 "imdb": None,
                 "sources": set(),
                 "seeds": set(),
+                "via_by": {},
             },
         )
         found[nid]["sources"].add((seed_id, signals.VIEWER))
@@ -180,10 +195,16 @@ def gather_seed(source, store, seed: dict[str, Any], *, with_makers: bool = True
         return found
 
     # --- maker signals: Wikidata, film-only in practice
-    enrichment = enrich(seed_imdb, store)
-    if not enrichment:
+    try:
+        enrichment = enrich(seed_imdb, store)
+        if not enrichment:
+            return found
+        neighbours = wd.maker_neighbours(enrichment)
+    except wd.WikidataError as e:
+        if degraded is not None:
+            label = seed.get("title") or seed_id
+            degraded.append(f"{label}: maker signals unavailable ({e})")
         return found
-    neighbours = wd.maker_neighbours(enrichment)
     if not neighbours:
         return found
 
@@ -204,10 +225,17 @@ def gather_seed(source, store, seed: dict[str, Any], *, with_makers: bool = True
                 "imdb": work.get("imdb"),
                 "sources": set(),
                 "seeds": set(),
+                "via_by": {},
             },
         )
         found[nid]["sources"].add((seed_id, work["signal"]))
         found[nid]["seeds"].add(seed_id)
+        # Who this came through, so one person votes once (signals.evidence_key).
+        # setdefault, not direct assignment: this candidate may already exist
+        # from the viewer signal, which carries no `via_by`.
+        found[nid].setdefault("via_by", {})[work["signal"]] = (
+            work.get("via") or {}
+        ).get("qid")
         found[nid]["imdb"] = found[nid].get("imdb") or work.get("imdb")
     return found
 
@@ -291,7 +319,8 @@ def recommend(
     if not seeds:
         raise SeedError("No seeds to recommend from.")
 
-    per_seed = [gather_seed(source, store, s) for s in seeds]
+    degraded: list[str] = []
+    per_seed = [gather_seed(source, store, s, degraded=degraded) for s in seeds]
     merged = signals.merge_and_score(per_seed)
 
     # The seeds themselves are never results.
@@ -303,14 +332,26 @@ def recommend(
     hydrate(source, store, merged, criteria)
     filtered, filter_reports = filters.run_all(merged, **criteria)
 
+    # Measured before exclusion, so the report below can tell the difference
+    # between "the viewer signal found nothing" and "it found things you have
+    # all already seen" -- which need different sentences and, for the user,
+    # different actions.
+    viewer_found = {
+        sid for sid, e in merged.items() if any(sig == signals.VIEWER for _, sig in e["sources"])
+    }
+
     # Exclusion last, always.
     kept, report = signals.exclude(filtered, store.exclusion_ids(), store.planned_ids())
     report["filters"] = filter_reports
+    viewer_survived = len(viewer_found & set(kept))
 
     results = signals.rank(kept, seed_count=len(seeds), limit=limit)
     store.log_served([r["simkl_id"] for r in results], [s["simkl_id"] for s in seeds])
 
     note = signals.shortfall_note(len(results), limit, len(seeds), report)
+    # A proportion, not a count. The first version used len//20, which called
+    # 3 survivors out of 42 healthy -- it plainly isn't.
+    saturated = bool(viewer_found) and viewer_survived < 0.25 * len(viewer_found)
     single_source = all(
         len({sig for _, sig in kept[r["simkl_id"]]["sources"]}) == 1 for r in results
     ) if results else False
@@ -328,7 +369,23 @@ def recommend(
         },
         "filters": filter_reports,
         "note": note,
-        "caveats": _caveats(seeds, results, single_source),
+        "signal_health": {
+            "viewer_candidates": len(viewer_found),
+            "viewer_surviving_exclusion": viewer_survived,
+            "saturated": saturated,
+        },
+        "degraded": degraded or None,
+        "caveats": _caveats(seeds, results, single_source)
+        + ([_saturation_caveat(len(viewer_found), viewer_survived)] if saturated else [])
+        + (
+            [
+                f"Wikidata was unreachable for {len(degraded)} of {len(seeds)} "
+                "seed(s), so those contributed only Simkl's viewer signal. "
+                "These results are thinner than they would normally be."
+            ]
+            if degraded
+            else []
+        ),
     }
 
 
@@ -351,6 +408,26 @@ def _caveats(seeds, results, single_source: bool) -> list[str]:
             "source to corroborate it."
         )
     return out
+
+
+def _saturation_caveat(viewer_found: int, viewer_survived: int) -> str:
+    """The sentence for a history that has swallowed its own neighbourhood.
+
+    Measured on a real library of 70 Marvel films: all 72 viewer candidates
+    but one were themselves films already watched. That is not a thin signal
+    and not a bug -- it is what "you have seen this entire corner of the
+    catalogue" looks like from the inside, and the honest move is to say so
+    rather than pad the list with a director's back catalogue and let it read
+    like a recommendation.
+    """
+    return (
+        f"You've seen almost everything the viewer signal found "
+        f"({viewer_found - viewer_survived} of {viewer_found} candidates were "
+        "already in your history), so these results lean on shared directors, "
+        "writers and composers instead. That signal is much weaker -- it will "
+        "surface a film-maker's unrelated older work. Seeding from titles "
+        "outside this franchise would give better answers."
+    )
 
 
 def tonight_seeds(store, limit: int = 6) -> list[dict[str, Any]]:

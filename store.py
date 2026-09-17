@@ -255,6 +255,16 @@ class Store:
             if w >= min_weight and r.get("status") != "plantowatch"
         ]
         picked.sort(key=lambda p: (p[0], p[1].get("last_watched_at") or ""), reverse=True)
+
+        # Spread the picks across the qualifying set rather than taking the top
+        # `limit` contiguously. Measured on a real library: 70 films all rated
+        # 8 produced six seeds that were all Spider-Man or early MCU, so every
+        # one of them had the same neighbours and the request explored one
+        # corner of the taste profile. Striding is deterministic, so a run
+        # stays reproducible.
+        if len(picked) > limit:
+            stride = len(picked) / limit
+            picked = [picked[int(i * stride)] for i in range(limit)]
         return [{**r, "taste_weight": w} for w, r in picked[:limit]]
 
     def dislikes(self) -> dict[int, float]:

@@ -32,12 +32,56 @@ MAKER_SIGNALS = ("director", "writer", "composer")
 FRANCHISE_SIGNALS = ("series", "based_on")
 
 
+# How much one piece of evidence is worth. The plan's original rule counted
+# every (seed, signal) pair equally; a live run on a real library showed why
+# that can't stand. Phase 0 (PLAN.md 9.1a) measured that the viewer signal is
+# the reliable one and the maker signal is film-only and noisy, and on a
+# franchise-heavy history the maker signal is mostly a director's unrelated
+# back catalogue -- Nomadland reached through Eternals, Cop Land through Logan.
+#
+# Unweighted, two such coincidences outranked a genuine viewer agreement. At
+# 0.35, a maker-only candidate needs three distinct people before it edges past
+# a single viewer agreement, and it can never beat two. `score` is still
+# reported as the honest count of distinct evidence; this only drives ranking.
+_SIGNAL_WEIGHT = {VIEWER: 1.0}
+_MAKER_WEIGHT = 0.35
+
+
+def weight_of(signal: str) -> float:
+    return _SIGNAL_WEIGHT.get(signal, _MAKER_WEIGHT)
+
+
+def evidence_key(seed_id: int, signal: str, via: str | None) -> tuple:
+    """What counts as *one* piece of evidence for a candidate.
+
+    For the viewer signal, each seed is genuinely independent: two of your
+    films whose audiences both also watched X are two separate observations.
+    Key on (seed, signal).
+
+    For maker signals it is the opposite, and getting this wrong was visible
+    the first time the engine ran on a real library. Sam Raimi directed
+    Spider-Man 1, 2 and 3; with three of those as seeds, his entire back
+    catalogue -- Evil Dead, Darkman, a 1973 comedy -- scored 3 and outranked
+    everything the viewer signal found. But that is not three films agreeing.
+    It is one fact, "Raimi made this", counted three times. So maker evidence
+    is keyed on (signal, person) and a person votes once however many of your
+    seeds they worked on.
+
+    This is PLAN.md §6.1's "don't let director + series + cast from the same
+    franchise count as three independent votes", applied to the case that
+    actually bites.
+    """
+    if via is None:
+        return (seed_id, signal)
+    return (signal, via)
+
+
 def merge_and_score(per_seed: list[dict[int, dict[str, Any]]]) -> dict[int, dict[str, Any]]:
     """Combine candidates from several seeds.
 
-    Score is the number of distinct (seed, signal) pairs that surfaced each
-    title. Keyed by Simkl ID throughout -- one namespace, so exclusion is an
-    integer set operation rather than a text match (§6.2).
+    Score is the number of distinct pieces of evidence (see `evidence_key`).
+    Keyed by Simkl ID throughout -- one namespace, so exclusion is an integer
+    set operation rather than a text match (§6.2).
     """
     merged: dict[int, dict[str, Any]] = {}
     for found in per_seed:
@@ -52,14 +96,20 @@ def merge_and_score(per_seed: list[dict[int, dict[str, Any]]]) -> dict[int, dict
                     "imdb": data.get("imdb"),
                     "sources": set(),
                     "seeds": set(),
+                    "evidence": set(),
                     "score": 0,
                 }
                 merged[simkl_id] = entry
-            # A (seed, signal) pair counts once however many times it fired.
-            new_pairs = data["sources"] - entry["sources"]
             entry["sources"] |= data["sources"]
             entry["seeds"] |= data["seeds"]
-            entry["score"] += len(new_pairs)
+            entry["evidence"] |= {
+                (evidence_key(seed, sig, (data.get("via_by") or {}).get(sig)), sig)
+                for seed, sig in data["sources"]
+            }
+            entry["score"] = len(entry["evidence"])
+            entry["weighted_score"] = round(
+                sum(weight_of(sig) for _, sig in entry["evidence"]), 3
+            )
             # Prefer a name over a None if a later seed knew more.
             for field in ("title", "year", "type", "imdb"):
                 if entry.get(field) is None and data.get(field) is not None:
@@ -80,11 +130,12 @@ def apply_taste(
         return candidates
     for entry in candidates.values():
         penalty = sum(dislikes.get(seed, 0.0) for seed in entry["seeds"])
+        base = entry.get("weighted_score", float(entry["score"]))
         if penalty:
             entry["taste_penalty"] = round(penalty, 3)
-            entry["adjusted_score"] = round(entry["score"] + penalty * 0.5, 3)
+            entry["adjusted_score"] = round(base + penalty * 0.5, 3)
         else:
-            entry["adjusted_score"] = float(entry["score"])
+            entry["adjusted_score"] = float(base)
     return candidates
 
 
@@ -151,9 +202,15 @@ def rank(
     a run is reproducible rather than dependent on dict ordering.
     """
     rows = list(candidates.values())
+    # At equal evidence, prefer what the viewer signal found. Phase 0 measured
+    # that the maker signal is film-only and, on a franchise-heavy history,
+    # mostly a director's unrelated back catalogue -- a 1966 comedy reached
+    # through a composer is not really a recommendation. Viewer backing is a
+    # tiebreak, not an override: it never reorders across different scores.
     rows.sort(
         key=lambda e: (
-            e.get("adjusted_score", e["score"]),
+            e.get("adjusted_score", e.get("weighted_score", e["score"])),
+            1 if any(sig == VIEWER for _, sig in e["sources"]) else 0,
             len(e["seeds"]),
             -(e.get("year") or 0),
         ),

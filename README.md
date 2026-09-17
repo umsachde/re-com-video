@@ -3,9 +3,9 @@
 Movie and TV recommendations that never suggest something you've already seen — the video
 sibling of [re-com](https://github.com/umsachde/re-com).
 
-> **Status: v1 engine works end to end.** Both recommendation flows run against live Simkl and
-> Wikidata, with exclusion holding. 134 unit tests, no network. What's left before it's finished:
-> the PIN login for real history sync, and the Netflix import path.
+> **Status: v1 works against a real library.** Both flows run live, exclusion holds, and the
+> engine has been tuned against an actual 70-film watch history — which broke four things no
+> fixture would have caught ([PLAN.md §9.1c](PLAN.md)). 153 unit tests, no network.
 > Design, research and measurements are in [PLAN.md](PLAN.md).
 
 ## The idea

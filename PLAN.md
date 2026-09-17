@@ -680,6 +680,60 @@ Polling must also stop at the first token — Simkl deletes an approved code, an
 code falls through to the *issue-a-new-code* branch, so a client that kept going would be handed a
 fresh code and wait forever.
 
+### 9.1c What the first real library taught (2026-09-16)
+
+Phase 2 ran against a real Simkl account: 70 films, the MCU plus the Fox X-Men and Sony
+Spider-Man eras, all rated 8. Four things broke that no amount of fixture testing would have
+found, and all four are now enforced with tests.
+
+**1. One person is not three votes.** Sam Raimi directed *Spider-Man* 1, 2 and 3. With three of
+those as seeds, §6.1's rule — count distinct (seed, signal) pairs — gave his entire back
+catalogue a score of 3: *Evil Dead*, *Darkman*, a 1966 comedy, all ranked above everything the
+viewer signal found. That is not three films agreeing; it is one fact, "Raimi made this",
+counted three times. §6.1 predicted exactly this and the first implementation did it anyway.
+
+> **Revision to §6.1.** Evidence is keyed per *source kind*. Viewer evidence keys on
+> `(seed, signal)` — two of your films whose audiences both also watched X really are two
+> observations. Maker evidence keys on `(signal, person)` — a person votes once however many of
+> your seeds they worked on.
+
+**2. The signals are not equal, so the scoring rule can no longer pretend they are.** Even after
+the dedupe, two unrelated maker coincidences outranked a genuine viewer agreement: *Nomadland*
+reached through *Eternals* (Chloé Zhao), *Cop Land* through *Logan* (James Mangold). Phase 0 had
+already measured which signal deserves the trust.
+
+> **Revision to §6.1.** Ranking is on a weighted score: viewer evidence 1.0, maker evidence 0.35.
+> A maker-only candidate now needs three distinct people to edge past a single viewer agreement
+> and can never beat two. The reported `score` stays the honest count of distinct evidence; the
+> weighting drives order only. *Rejected: leaving the rule unweighted* — it produced a
+> recommender that answered "you loved Deadpool" with a 1966 comedy.
+
+**3. A history can swallow its own neighbourhood, and the engine has to say so.** With all 70
+Marvel films watched, the six "tonight" seeds produced 72 viewer candidates of which **exactly
+one** survived exclusion — every other one was itself a Marvel film already in the history.
+Meanwhile 184 maker candidates flooded in. The result was 99% back-catalogue noise that still
+*looked* like a ranked recommendation.
+
+This is not a bug and not a thin signal; it is what "you have seen this entire corner of the
+catalogue" looks like from the inside. Results now carry `signal_health`, and when fewer than a
+quarter of viewer candidates survive exclusion the response says plainly that the picks are
+leaning on the weaker signal and that seeding from outside the franchise would do better.
+
+**4. Seeds drawn from one corner explore one corner.** Seventy films all rated 8 tie on weight,
+so the top six were all Spider-Man or early MCU — six seeds with substantially the same
+neighbours. Seeds are now spread deterministically across the qualifying set rather than taken
+contiguously, which changed them to Spider-Man, X-Men, Winter Soldier, Logan and Deadpool.
+
+**5. One dead signal must not sink the request.** A Wikidata read timeout — its 60-second budget
+is real and public — raised straight through and killed an entire recommendation. The viewer
+signal alone is a usable answer and a far better one than an exception. Failures now degrade the
+result and are reported in `degraded`, never swallowed.
+
+**What it looks like when the neighbourhood isn't saturated.** Seeded from *Free Guy*, *The Adam
+Project* and *Top Gun: Maverick* — the same library, different corner — the engine returns
+Central Intelligence, Jumanji, Red Notice, Bullet Train and Uncharted, with 21 of 27 viewer
+candidates surviving. The machinery is sound; finding 3 above was the history, not the code.
+
 ### 9.2 Once there is code (mirrors re-com §5)
 
 | Layer | Covers |

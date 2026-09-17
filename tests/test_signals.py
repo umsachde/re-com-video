@@ -119,7 +119,8 @@ def test_a_disliked_seed_demotes_but_never_excludes():
 def test_taste_leaves_untouched_candidates_alone():
     merged = signals.merge_and_score([cand(1, "X", [(10, "director")])])
     out = signals.apply_taste(merged, dislikes={99: -2.0})
-    assert out[1]["adjusted_score"] == float(out[1]["score"])
+    assert out[1]["adjusted_score"] == out[1]["weighted_score"]
+    assert "taste_penalty" not in out[1]
 
 
 def test_no_dislikes_is_a_no_op():
@@ -259,3 +260,121 @@ def test_plan_to_watch_is_named_in_the_shortfall():
         1, 5, 1, {"excluded_on_your_list": [{"simkl_id": 1}, {"simkl_id": 2}]}
     )
     assert "Plan to Watch" in note
+
+
+# --- one person, one vote ---------------------------------------------------
+#
+# Found the first time the engine ran on a real library: Sam Raimi directed
+# Spider-Man 1, 2 and 3, so with three of those as seeds his whole back
+# catalogue scored 3 and buried everything the viewer signal found.
+
+
+def maker(simkl_id, title, pairs, via):
+    """A maker-signal candidate, carrying the person it came through."""
+    entry = cand(simkl_id, title, pairs)
+    entry[simkl_id]["via_by"] = via
+    return entry
+
+
+def test_one_person_votes_once_across_many_seeds():
+    """Three of your films sharing a director is one fact, not three."""
+    merged = signals.merge_and_score([
+        maker(1, "Evil Dead", [(10, "director")], {"director": "Q-raimi"}),
+        maker(1, "Evil Dead", [(11, "director")], {"director": "Q-raimi"}),
+        maker(1, "Evil Dead", [(12, "director")], {"director": "Q-raimi"}),
+    ])
+    assert merged[1]["score"] == 1
+
+
+def test_two_different_people_are_two_votes():
+    merged = signals.merge_and_score([
+        maker(1, "X", [(10, "director")], {"director": "Q-a"}),
+        maker(1, "X", [(11, "director")], {"director": "Q-b"}),
+    ])
+    assert merged[1]["score"] == 2
+
+
+def test_the_same_person_through_two_roles_counts_twice():
+    """Writing and directing something are two separate contributions."""
+    merged = signals.merge_and_score([
+        maker(1, "X", [(10, "director"), (10, "writer")],
+              {"director": "Q-a", "writer": "Q-a"}),
+    ])
+    assert merged[1]["score"] == 2
+
+
+def test_viewer_seeds_stay_independent():
+    """Two of your films whose audiences both also watched X really are two
+    observations -- this dedupe must not flatten them."""
+    merged = signals.merge_and_score([
+        cand(1, "X", [(10, "viewers")]),
+        cand(1, "X", [(11, "viewers")]),
+    ])
+    assert merged[1]["score"] == 2
+
+
+def test_viewer_and_maker_evidence_add_up():
+    merged = signals.merge_and_score([
+        cand(1, "X", [(10, "viewers")]),
+        maker(1, "X", [(11, "director")], {"director": "Q-a"}),
+    ])
+    assert merged[1]["score"] == 2
+
+
+def test_a_shared_director_no_longer_outranks_viewer_agreement():
+    """The regression this was written for, end to end."""
+    three_raimi_seeds = [
+        maker(1, "Darkman", [(s, "director")], {"director": "Q-raimi"})
+        for s in (10, 11, 12)
+    ]
+    viewer_agreement = [cand(2, "Good Pick", [(s, "viewers")]) for s in (10, 11)]
+    merged = signals.merge_and_score(three_raimi_seeds + viewer_agreement)
+    assert merged[2]["score"] > merged[1]["score"]
+
+
+# --- signal weighting -------------------------------------------------------
+#
+# Phase 0 measured the viewer signal is the reliable one and the maker signal
+# is film-only and noisy. Unweighted, two maker coincidences outranked a real
+# viewer agreement -- Nomadland via Eternals, Cop Land via Logan.
+
+
+def test_one_viewer_agreement_beats_two_unrelated_makers():
+    merged = signals.merge_and_score([
+        cand(1, "Viewer Pick", [(10, "viewers")]),
+        maker(2, "Back Catalogue", [(10, "director"), (11, "composer")],
+              {"director": "Q-a", "composer": "Q-b"}),
+    ])
+    out = signals.rank(merged, seed_count=2, limit=5)
+    assert [r["simkl_id"] for r in out] == [1, 2]
+
+
+def test_three_makers_can_edge_past_one_viewer():
+    """Weighted, not silenced -- a genuinely dense maker link still counts."""
+    merged = signals.merge_and_score([
+        cand(1, "Viewer Pick", [(10, "viewers")]),
+        maker(2, "Dense", [(10, "director"), (10, "writer"), (10, "composer")],
+              {"director": "Q-a", "writer": "Q-b", "composer": "Q-c"}),
+    ])
+    out = signals.rank(merged, seed_count=1, limit=5)
+    assert [r["simkl_id"] for r in out] == [2, 1]
+
+
+def test_two_viewer_agreements_beat_any_realistic_maker_pile():
+    merged = signals.merge_and_score([
+        cand(1, "Agreed", [(10, "viewers"), (11, "viewers")]),
+        maker(2, "Pile", [(10, "director"), (10, "writer"), (10, "composer")],
+              {"director": "Q-a", "writer": "Q-b", "composer": "Q-c"}),
+    ])
+    out = signals.rank(merged, seed_count=2, limit=5)
+    assert [r["simkl_id"] for r in out] == [1, 2]
+
+
+def test_score_still_reports_the_honest_evidence_count():
+    """Weighting drives the ranking; the number shown is still a real count."""
+    merged = signals.merge_and_score([
+        maker(1, "X", [(10, "director"), (10, "writer")],
+              {"director": "Q-a", "writer": "Q-b"}),
+    ])
+    assert merged[1]["score"] == 2
+    assert merged[1]["weighted_score"] < 2
