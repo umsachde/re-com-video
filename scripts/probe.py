@@ -123,16 +123,33 @@ def probe_seed(seed: dict[str, Any], *, skip_simkl: bool = False) -> dict[str, A
                 detail = _simkl_get(f"{kind}/{resolved['simkl_id']}", {"extended": "full"})
                 neighbours = (detail or {}).get("users_recommendations") or []
                 out["viewer_neighbours"] = len(neighbours)
-                with_imdb = [
-                    n for n in neighbours if ((n.get("ids") or {}).get("imdb"))
-                ]
-                out["viewer_neighbours_with_imdb"] = len(with_imdb)
+                # Measured 2026-09-16: a users_recommendations entry carries only
+                # ids.simkl and ids.slug -- never an imdb id. So the join key has
+                # to be fetched with a second hop per neighbour. Those detail
+                # endpoints are the Cloudflare-cached ones Simkl explicitly allows
+                # hammering, which is what makes this affordable.
+                out["viewer_ids_inline"] = sorted(
+                    {k for n in neighbours for k in (n.get("ids") or {})}
+                )
+                out["viewer_strength_present"] = sum(
+                    1 for n in neighbours if n.get("users_percent") or n.get("users_count")
+                )
+                imdb_ids = []
+                for n in neighbours:
+                    nid = (n.get("ids") or {}).get("simkl")
+                    ntype = n.get("type") or "tv"
+                    if nid is None:
+                        continue
+                    seg = {"movie": "/movies", "tv": "/tv", "anime": "/anime"}.get(ntype, "/tv")
+                    nd = _simkl_get(f"{seg}/{int(nid)}", {"extended": "full"})
+                    got = ((nd or {}).get("ids") or {}).get("imdb")
+                    if got:
+                        imdb_ids.append(got)
+                out["viewer_neighbours_with_imdb"] = len(imdb_ids)
                 out["viewer_imdb_share"] = (
-                    round(len(with_imdb) / len(neighbours), 3) if neighbours else None
+                    round(len(imdb_ids) / len(neighbours), 3) if neighbours else None
                 )
-                out["_viewer_imdb_set"] = sorted(
-                    {(n.get("ids") or {}).get("imdb") for n in with_imdb if (n.get("ids") or {}).get("imdb")}
-                )
+                out["_viewer_imdb_set"] = sorted(set(imdb_ids))
                 out["simkl_runtime"] = (detail or {}).get("runtime")
                 out["simkl_language"] = (detail or {}).get("language")
                 out["simkl_country"] = (detail or {}).get("country")
@@ -264,19 +281,36 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         )
     else:
         jac = med([r.get("viewer_maker_jaccard") for r in measured_viewer])
+        # A median alone hides the shape: most seeds can share nothing while a
+        # few share a lot. Both numbers are reported, because "the sources are
+        # independent" and "they are independent for most titles" have
+        # different consequences for the scoring rule.
+        any_overlap = sum(1 for r in measured_viewer if r.get("viewer_maker_overlap"))
+        share = any_overlap / len(measured_viewer)
+        worst = max((r.get("viewer_maker_jaccard") or 0) for r in measured_viewer)
         gates.append(
             {
                 "gate": "Viewer vs maker overlap (Jaccard)",
-                "value": jac,
+                "value": (
+                    f"median {jac}, max {round(worst, 3)}, "
+                    f"{any_overlap}/{len(measured_viewer)} seeds share anything"
+                ),
                 "reading": (
-                    "Near zero: the two sources are independent. Expect variety, "
-                    "not corroboration -- and note that the agreement score will "
-                    "rarely exceed 1 from these two alone."
-                    if jac is not None and jac < 0.05
-                    else "They overlap: agreement between them is meaningful."
+                    "Largely independent: most seeds share nothing between the "
+                    "two sources, so expect variety rather than corroboration, "
+                    "and expect the agreement score to be driven by how many "
+                    "SEEDS surfaced a title rather than how many sources did."
+                    if share < 0.5
+                    else "They overlap often: agreement between them is meaningful."
                 ),
             }
         )
+        if any_overlap and share < 0.5:
+            gates[-1]["reading"] += (
+                f" It is not zero though -- {any_overlap} seeds do overlap "
+                "(up to Jaccard %.3f), so a cross-source agreement of 2 is rare "
+                "but real and should not be treated as impossible." % worst
+            )
     conc = concentration(results)
     if conc:
         worst = max(conc, key=lambda p: p["jaccard"] or 0)

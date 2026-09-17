@@ -1,21 +1,25 @@
 # re-com-video — Design, Research & Roadmap
 
-The movie and TV sibling of [re-com](https://github.com/umsachde/re-com). **Status: Phase 0 half
-measured, Phase 1 built.** This document carries the design, the research, what was ruled out and
+The movie and TV sibling of [re-com](https://github.com/umsachde/re-com). **Status: Phase 0 measured,
+Phase 1 built.** This document carries the design, the research, what was ruled out and
 why, and what has been measured so far.
 
-**What exists as of 2026-09-15**
+**What exists as of 2026-09-16**
 
 | | |
 | --- | --- |
-| `simkl-mcp` | Built (§7.1) — client, PIN auth, sync, detail reads, ID resolution, writes; 84 unit tests, no network. Not yet run against a live account: needs a `client_id`. |
+| `simkl-mcp` | Built (§7.1) — client, PIN auth, sync, detail reads, ID resolution, writes; 84 unit tests. `client_id` verified live; the PIN login has not been run yet. |
 | `wikidata.py` | Built and **verified live** — enrichment and maker-neighbour expansion; 24 unit tests. |
-| `scripts/probe.py` | Built. Wikidata half **run** (§9.1a); Simkl half blocked on a `client_id`. |
-| The engine (§7.2) | Not started. Phase 2. |
+| `scripts/probe.py` | Built and **run in full** (§9.1a). |
+| The engine (§7.2) | Not started. Phase 2 — and now unblocked. |
 
-**The one thing blocking the rest:** a free Simkl app registered at
-[simkl.com/settings/developer](https://simkl.com/settings/developer), which yields the `client_id`
-that every Simkl call needs. Without it the decisive measurement (§9.1 question 1) cannot run.
+**Phase 0 is done for the signal questions.** What it changed is in §9.1a; the short version is
+that the viewer signal is capped at 12 per seed, the cross-source join needs a second hop, TV is
+viable on the viewer signal alone, and the two sources agree rarely enough that multi-seed
+requests are where the ranking earns its keep.
+
+**Still outstanding:** history fidelity (§9.1 questions 6–7) needs the Netflix personal-data
+export, which takes up to 30 days — worth requesting before anything else.
 
 It follows re-com's convention: one document, decisions with the alternative they beat, and
 facts labelled by how well they are known. Every external claim carries the date it was
@@ -520,11 +524,68 @@ language), 8 Western, 4 other (e.g. Korean); a mix of movies and shows.
 - Viewer ∩ maker overlap near zero → they're independent: expect variety, not corroboration.
 - Import drops many titles → exclusion needs an explicit "unmatched history" report.
 
-### 9.1a Phase 0 — first results (Wikidata half)
+### 9.1a Phase 0 — results
 
-**Measured 2026-09-15** by `scripts/probe.py --skip-simkl` over 20 placeholder seeds (9 Indian,
-8 Western, 3 other; a mix of films and series). The Simkl half has not run — it needs a
-`client_id` — so questions 1, 2 and 4 are **undecided, not passed**.
+**Measured 2026-09-16** by `scripts/probe.py` over 20 placeholder seeds (9 Indian, 8 Western,
+3 other; a mix of films and series), against a live Simkl `client_id` and the Wikidata query
+service. All five questions in §9.1 are now answered. The remaining gap is history fidelity
+(questions 6 and 7), which needs the Netflix export.
+
+#### The viewer signal
+
+| Group | Seeds | Median viewer neighbours | Neighbours resolving to an IMDb ID |
+| --- | --: | --: | --: |
+| Indian | 9 | 12 | 100% |
+| Western | 8 | 12 | 100% |
+| Other (KR, JP) | 3 | 12 | 100% |
+
+**`users_recommendations` is hard-capped at 12.** Every seed in every catalogue returned 11 or
+12 — never 3, never 40. It is a fixed-size list, not a measure of how similar anything is. The
+practical consequence: **the viewer signal contributes at most 12 candidates per seed**, so
+`limit` above ~12 on a single-seed request has to be met from the maker signal or reported short.
+
+**Decision gate 1 is settled, and the worry was unfounded.** Indian and Western medians are both
+12, ratio 1.00. Simkl's viewer data is not thinner on the Indian catalogue.
+
+**There is no strength data.** `users_percent` is `null` and `users_count` is `0` on all 232
+neighbours of all 20 seeds. There is an ordering within the 12 and nothing else — no confidence
+weight to rank or threshold on.
+
+#### The cross-source join costs a second hop
+
+A `users_recommendations` entry carries **only `ids.simkl` and `ids.slug`** — no IMDb ID, so the
+Wikidata join key is not in the payload. §9.1 question 2 as originally written ("what share carry
+an IMDb ID") answers **0%**, and the first probe run duly reported a Jaccard of 0.0, which was an
+artifact of not being able to compare rather than a finding.
+
+Resolved by a second hop: neighbour `simkl_id` → `GET /movies|/tv|/anime/{id}` → `ids.imdb`.
+**That works for 100% of neighbours** (232/232). It costs one extra call per neighbour, but those
+are exactly the Cloudflare-cached detail endpoints Simkl explicitly permits calling in parallel,
+so it is affordable. Any implementation must do this hop; without it the two sources cannot be
+joined at all.
+
+#### The two sources are *largely* independent — not entirely
+
+| | |
+| --- | --- |
+| Seeds sharing nothing between viewer and maker | 13 / 20 |
+| Seeds sharing something | 7 / 20 (19 titles total) |
+| Jaccard | median 0.0, mean 0.043, **max 0.235** |
+
+Where they overlap: *Oppenheimer* 5 titles, *Poor Things* 4, *Drive My Car* 4, *Dune* 3, and one
+each for *12th Fail*, *Kantara* and *Past Lives*. The pattern is Western and auteur-driven film;
+**every TV seed overlapped zero**.
+
+**What this does to the scoring rule.** §6.1 scores by distinct (seed, signal) pairs. With these
+two sources, a cross-source agreement of 2 on a single seed is rare but real — so the score is
+mostly driven by *how many seeds* surfaced a title, not by how many sources did. That is still a
+usable ranking, but multi-seed requests are where it has any discriminating power at all. A
+single-seed request is close to a flat list, and should be presented as one rather than as a
+ranking that means something.
+
+#### The earlier Wikidata findings, unchanged
+
+The maker-side numbers below were measured 2026-09-15 and are unaffected by the Simkl half.
 
 | Group | Seeds | Wikidata found | Has director | Median maker neighbours |
 | --- | --: | --: | --: | --: |
@@ -544,9 +605,16 @@ properties; series credit episode directors, who are not modelled the same way.
 
 > **The maker signal is a movie signal.** For TV it degrades to composer-only, and sometimes to
 > nothing. That makes Simkl's `users_recommendations` not merely the better signal for TV but
-> very likely the *only* one — which raises, rather than lowers, the stakes on the measurement
-> still blocked. If TV neighbour counts also come back thin, v1 has no TV recommender and the
-> plan has to say so plainly rather than shipping a thin one.
+> very likely the *only* one.
+
+**Now resolved, and the answer is good: v1 can recommend TV.** The two seeds with zero maker
+neighbours — *Kota Factory* and *The Bear* — both return a full 12 and 11 viewer neighbours.
+*Panchayat*, with one maker neighbour, returns 12. So no series is left without a signal.
+
+The caveat to state in tool responses: for those titles the recommendation rests on **one
+source with no corroboration available**, because every TV seed had zero viewer∩maker overlap.
+A TV pick is a single-signal pick, and §1's third hard requirement says so out loud rather than
+letting it read like the same kind of answer a film gets.
 
 **3. Music director is the load-bearing Indian signal, as predicted — more so than predicted.**
 `composer` (P86) fires on 6 of 9 Indian seeds and is usually the largest contributor: 12 of 23
@@ -607,7 +675,7 @@ harness gets its own tests.
 
 | Phase | Scope | State |
 | --- | --- | --- |
-| **0 — Probe** | §9.1. Write results back into this document. | **Wikidata half done (§9.1a).** Simkl half blocked on a `client_id`. Netflix data export still to request — it takes up to 30 days. |
+| **0 — Probe** | §9.1. Write results back into this document. | **Signal questions done (§9.1a).** History fidelity (questions 6–7) still needs the Netflix export — request it, it takes up to 30 days. |
 | **1 — `simkl-mcp`** | PIN auth, library sync, title details, ID resolution, writes (§7.1) | **Built**, 84 unit tests. Unrun against a live account. |
 | **2 — v1 engine** | `recommend_from_titles`, `recommend_for_tonight`, explain, refresh, taste, exclusion, Wikidata enrichment cache | `wikidata.py` (the maker half) built and live-verified. The Simkl half, scoring, exclusion and the tool surface are next. |
 | **3 — History depth** | Direct Netflix CSV importer (durations), implicit feedback (§5.2), unmatched-history report | not started |
@@ -615,10 +683,11 @@ harness gets its own tests.
 | **5 — Tone** | a mood/tone layer beyond genre: Claude reading overviews, best-source-wins like re-com §4.5 | not started |
 | **6 — Availability** | only if a free, lawful, region-aware source appears (§4.6) | — |
 
-**Next, in order.** (1) Register the Simkl app and run `scripts/probe.py` in full — §9.1a's
-question 2 about TV is now the one that decides whether v1 recommends TV at all. (2) Request the
-Netflix personal-data export, which takes up to 30 days and is wanted before phase 3. (3) Build
-the phase 2 engine on whatever the probe says, not on what this document assumed.
+**Next, in order.** (1) Request the Netflix personal-data export — 30-day lead time, and it is
+the only thing still gating Phase 0. (2) Run the PIN login so the library sync can be exercised
+against a real account. (3) Build the Phase 2 engine on what §9.1a measured: a viewer signal
+capped at 12 per seed that needs a second hop to join, a maker signal that is film-only, and a
+ranking that only discriminates across multiple seeds.
 
 ---
 

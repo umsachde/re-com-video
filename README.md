@@ -3,10 +3,10 @@
 Movie and TV recommendations that never suggest something you've already seen — the video
 sibling of [re-com](https://github.com/umsachde/re-com).
 
-> **Status: Phase 0 half measured, Phase 1 built.** The sibling server
-> [`simkl-mcp`](https://github.com/umsachde/simkl-mcp) is written and tested; the Wikidata half of
-> this engine is written and verified against the live query service. The recommender itself is
-> next. Design, research and measurements are in [PLAN.md](PLAN.md).
+> **Status: Phase 0 measured, Phase 1 built.** The sibling server
+> [`simkl-mcp`](https://github.com/umsachde/simkl-mcp) is written and tested, and the Phase 0
+> probe has run in full against live Simkl and Wikidata. The recommender itself is next.
+> Design, research and measurements are in [PLAN.md](PLAN.md).
 
 ## The idea
 
@@ -53,23 +53,30 @@ For the full probe, register a free app at
 [simkl.com/settings/developer](https://simkl.com/settings/developer) and
 `export SIMKL_CLIENT_ID=…` first.
 
-## What the probe found (2026-09-15)
+## What the probe found (2026-09-16)
 
-Measured over 20 seeds, Wikidata half only — the Simkl half is still blocked on a `client_id`.
+Measured over 20 seeds against live Simkl and Wikidata. Full numbers in
+[PLAN.md §9.1a](PLAN.md).
 
-- **Wikidata resolved 20/20 seeds by IMDb ID**, all with an original language. The worry that it
-  would be thin on the Indian catalogue was the wrong worry: Indian seeds returned a *higher*
-  median of maker-based neighbours (19) than Western ones (13.5).
-- **The real gap is format, not region.** Every seed that returned zero maker neighbours is a
-  series — *Kota Factory*, *The Bear*; *Panchayat* returned one. Wikidata's director and writer
-  properties are film properties. **The maker signal is a movie signal**, which makes Simkl's
-  viewer-based neighbours very likely the *only* signal for TV.
-- **Music director carries Indian film**, as [PLAN.md §2.4](PLAN.md) guessed and more so —
-  `composer` supplied 12 of 23 candidates for *12th Fail* and 12 of 14 for *Laapataa Ladies*.
-- **Titles collide exactly as expected**: a live query matched "Panchayat" to 4 Wikidata items,
-  "Parasite" to 6, "Severance" to 5. Nothing here joins on anything but an IMDb ID.
-
-Full numbers and what they change: [PLAN.md §9.1a](PLAN.md#91a-phase-0--first-results-wikidata-half).
+- **Simkl's viewer signal is hard-capped at 12 per title.** Every seed in every catalogue
+  returned 11 or 12 — it's a fixed-size list, not a measure of similarity. So a single-seed
+  request has a ceiling of ~12 candidates from that source.
+- **The geography worry was unfounded.** Indian and Western seeds both median 12 viewer
+  neighbours (ratio 1.00), and Wikidata resolved 20/20 seeds by IMDb ID — with Indian seeds
+  returning *more* maker-based neighbours (median 19) than Western (13.5).
+- **v1 can recommend TV, on the viewer signal alone.** Wikidata's director and writer properties
+  are film properties: *Kota Factory* and *The Bear* return zero maker neighbours. Both return a
+  full 11–12 viewer neighbours, so no series is left without a signal — but a TV pick rests on
+  one source, and says so.
+- **The cross-source join costs a second hop.** A viewer neighbour carries only `ids.simkl` and
+  `ids.slug`, never an IMDb ID. Resolving it through the cached detail endpoint works for
+  100% of neighbours.
+- **The two sources rarely agree**: 13 of 20 seeds share nothing, 7 share 1–5 titles (max
+  Jaccard 0.235), and every TV seed shared zero. So the agreement score is driven by how many
+  *seeds* surfaced a title, not how many sources — multi-seed requests are where the ranking
+  means anything.
+- **Music director carries Indian film**, more than expected — `composer` supplied 12 of 23
+  candidates for *12th Fail* and 12 of 14 for *Laapataa Ladies*.
 
 ## Known limitation
 
